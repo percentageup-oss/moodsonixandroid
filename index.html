@@ -27,48 +27,78 @@
     <script>
       (function() {
         var OriginalWebSocket = window.WebSocket;
-        if (OriginalWebSocket) {
-          window.WebSocket = function(url, protocols) {
-            var isViteHmr = (Array.isArray(protocols) ? protocols.indexOf('vite-hmr') !== -1 : protocols === 'vite-hmr') ||
-                            (typeof url === 'string' && (url.indexOf('vite-hmr') !== -1 || url.indexOf('token=') !== -1));
-            if (isViteHmr) {
-              var target = new EventTarget();
-              this.readyState = 0;
-              this.url = url;
-              this.protocol = 'vite-hmr';
-              this.addEventListener = target.addEventListener.bind(target);
-              this.removeEventListener = target.removeEventListener.bind(target);
-              this.dispatchEvent = target.dispatchEvent.bind(target);
-              this.send = function() {};
-              this.close = function() {
-                this.readyState = 3;
-                this.dispatchEvent(new Event('close'));
-              };
-              var self = this;
-              setTimeout(function() {
-                self.readyState = 1;
-                self.dispatchEvent(new Event('open'));
-              }, 10);
-              return;
-            }
-            return new OriginalWebSocket(url, protocols);
-          };
-          window.WebSocket.prototype = OriginalWebSocket.prototype;
-          window.WebSocket.CONNECTING = 0;
-          window.WebSocket.OPEN = 1;
-          window.WebSocket.CLOSING = 2;
-          window.WebSocket.CLOSED = 3;
+        if (typeof OriginalWebSocket !== 'undefined') {
+          try {
+            window.WebSocket = new Proxy(OriginalWebSocket, {
+              construct: function(target, args) {
+                var url = args[0];
+                var protocols = args[1];
+                var isViteHmr = (Array.isArray(protocols) ? protocols.indexOf('vite-hmr') !== -1 : protocols === 'vite-hmr') ||
+                                (typeof url === 'string' && (url.indexOf('vite-hmr') !== -1 || url.indexOf('token=') !== -1));
+                if (isViteHmr) {
+                  var listeners = {};
+                  var fakeWs = {
+                    url: url,
+                    protocols: protocols,
+                    readyState: 1, // OPEN
+                    OPEN: 1,
+                    CONNECTING: 0,
+                    CLOSING: 2,
+                    CLOSED: 3,
+                    addEventListener: function(type, fn) {
+                      listeners[type] = listeners[type] || [];
+                      listeners[type].push(fn);
+                    },
+                    removeEventListener: function(type, fn) {
+                      if (listeners[type]) {
+                        listeners[type] = listeners[type].filter(function(f) { return f !== fn; });
+                      }
+                    },
+                    dispatchEvent: function(evt) {
+                      var list = listeners[evt && evt.type] || [];
+                      list.forEach(function(fn) { try { fn(evt); } catch(e) {} });
+                      return true;
+                    },
+                    send: function() {},
+                    close: function() {
+                      this.readyState = 3;
+                      var list = listeners['close'] || [];
+                      list.forEach(function(fn) { try { fn({ type: 'close' }); } catch(e) {} });
+                    }
+                  };
+                  setTimeout(function() {
+                    var list = listeners['open'] || [];
+                    list.forEach(function(fn) { try { fn({ type: 'open' }); } catch(e) {} });
+                  }, 0);
+                  return fakeWs;
+                }
+                return Reflect.construct(target, args);
+              }
+            });
+          } catch (_) {}
         }
 
+        var origConsoleError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          var msg = args.map(function(a) { return typeof a === 'string' ? a : (a && a.message) || ''; }).join(' ');
+          if (msg.indexOf('WebSocket closed without opened') !== -1 || msg.indexOf('failed to connect to websocket') !== -1 || msg.indexOf('vite-hmr') !== -1) {
+            return;
+          }
+          return origConsoleError.apply(console, arguments);
+        };
+
         window.addEventListener('unhandledrejection', function(event) {
-          if (event && event.reason && String(event.reason).indexOf('WebSocket closed without opened') !== -1) {
+          var msg = String((event && event.reason && (event.reason.message || event.reason)) || '');
+          if (msg.indexOf('WebSocket closed without opened') !== -1 || msg.indexOf('vite-hmr') !== -1) {
             event.preventDefault();
             event.stopImmediatePropagation();
           }
         }, true);
 
         window.addEventListener('error', function(event) {
-          if (event && event.message && String(event.message).indexOf('WebSocket closed without opened') !== -1) {
+          var msg = String((event && (event.message || event.error)) || '');
+          if (msg.indexOf('WebSocket closed without opened') !== -1 || msg.indexOf('vite-hmr') !== -1) {
             event.preventDefault();
             event.stopImmediatePropagation();
           }
