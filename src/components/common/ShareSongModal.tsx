@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Song } from '../../types/music';
 import { X, Copy, Check, Share2, Link } from 'lucide-react';
+import { API_BASE } from '../../lib/apiBase';
 
 interface ShareSongModalProps {
   song: Song | null;
@@ -13,7 +14,7 @@ export const ShareSongModal: React.FC<ShareSongModalProps> = ({ song, isOpen, on
 
   if (!isOpen || !song) return null;
 
-  const shareUrl = `${window.location.origin}/?song=${song.id}`;
+  const shareUrl = `${API_BASE || window.location.origin}/?song=${song.id}`;
 
   const handleCopy = async () => {
     try {

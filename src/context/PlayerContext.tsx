@@ -2,6 +2,12 @@ import React, { createContext, useContext, useEffect, useRef, useState, useCallb
 import { Song, PlaybackState, RepeatMode } from '../types/music';
 import { useQueue } from './QueueContext';
 import { ambientAudio } from '../services/ambientAudio';
+import {
+  setNativeMetadata,
+  setNativePlaybackState,
+  setNativePositionState,
+  setNativeActionHandler
+} from '../lib/nativeMediaSession';
 
 declare global {
   interface Window {
@@ -180,14 +186,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Safely update MediaSession position state
   const syncPositionState = useCallback((pos?: number, dur?: number, rate?: number) => {
-    if (
-      typeof navigator === 'undefined' ||
-      !('mediaSession' in navigator) ||
-      typeof navigator.mediaSession.setPositionState !== 'function'
-    ) {
-      return;
-    }
-
     const totalDuration = typeof dur === 'number' ? dur : durationRef.current;
     const rawPosition = typeof pos === 'number' ? pos : currentTimeRef.current;
     const currentRate = typeof rate === 'number' && rate > 0 ? rate : (playbackRateRef.current > 0 ? playbackRateRef.current : 1);
@@ -200,15 +198,28 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       Number.isFinite(rawPosition)
     ) {
       const clampedPosition = Math.max(0, Math.min(rawPosition, totalDuration));
-      try {
-        navigator.mediaSession.setPositionState({
-          duration: totalDuration,
-          playbackRate: currentRate,
-          position: clampedPosition
-        });
-      } catch {
-        // Ignore transient invalid state errors
+
+      if (
+        typeof navigator !== 'undefined' &&
+        'mediaSession' in navigator &&
+        typeof navigator.mediaSession.setPositionState === 'function'
+      ) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: totalDuration,
+            playbackRate: currentRate,
+            position: clampedPosition
+          });
+        } catch {
+          // Ignore transient invalid state errors
+        }
       }
+
+      setNativePositionState({
+        duration: totalDuration,
+        position: clampedPosition,
+        playbackRate: currentRate
+      });
     }
   }, []);
 
@@ -426,6 +437,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       localStorage.setItem('moodsonix_last_song', JSON.stringify(song));
     } catch {}
     addToHistory(song);
+    setNativePlaybackState('playing');
 
     const audio = audioRef.current;
 
@@ -501,6 +513,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     hasUserInteractedRef.current = true;
     setIsSessionStopped(false);
     void ambientAudio.resumeContext();
+    setNativePlaybackState('playing');
 
     const song = currentSongRef.current;
     if (!song) return;
@@ -998,62 +1011,90 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // 1. Register Media Session action handlers ONCE on mount (wired directly to player functions)
   useEffect(() => {
-    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
-
-    const actionMap: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
-      ['play', () => resumeRef.current()],
-      ['pause', () => pauseRef.current()],
-      ['previoustrack', () => previousTrackRef.current()],
-      ['nexttrack', () => nextTrackRef.current()],
-      [
-        'seekbackward',
-        (details) => {
-          const offset = details?.seekOffset ?? 10;
-          seekToRef.current(Math.max(0, currentTimeRef.current - offset));
-        }
-      ],
-      [
-        'seekforward',
-        (details) => {
-          const offset = details?.seekOffset ?? 10;
-          const dur = durationRef.current || 0;
-          const pos = dur > 0 ? Math.min(dur, currentTimeRef.current + offset) : currentTimeRef.current + offset;
-          seekToRef.current(pos);
-        }
-      ],
-      [
-        'seekto',
-        (details) => {
-          if (typeof details?.seekTime === 'number' && Number.isFinite(details.seekTime)) {
-            seekToRef.current(details.seekTime, Boolean(details.fastSeek));
-          }
-        }
-      ],
-      ['stop', () => stopRef.current()]
-    ];
-
-    actionMap.forEach(([action, handler]) => {
-      try {
-        navigator.mediaSession.setActionHandler(action, handler);
-      } catch (err) {
-        console.warn(`[Moodsonix] MediaSession action "${action}" not supported:`, err);
+    // Native action handlers
+    setNativeActionHandler('play', () => resumeRef.current());
+    setNativeActionHandler('pause', () => pauseRef.current());
+    setNativeActionHandler('previoustrack', () => previousTrackRef.current());
+    setNativeActionHandler('nexttrack', () => nextTrackRef.current());
+    setNativeActionHandler('seekto', (details) => {
+      if (typeof details?.seekTime === 'number' && Number.isFinite(details.seekTime)) {
+        seekToRef.current(details.seekTime, Boolean((details as any)?.fastSeek));
       }
     });
+    setNativeActionHandler('stop', () => stopRef.current());
+
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+      const actionMap: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+        ['play', () => resumeRef.current()],
+        ['pause', () => pauseRef.current()],
+        ['previoustrack', () => previousTrackRef.current()],
+        ['nexttrack', () => nextTrackRef.current()],
+        [
+          'seekbackward',
+          (details) => {
+            const offset = details?.seekOffset ?? 10;
+            seekToRef.current(Math.max(0, currentTimeRef.current - offset));
+          }
+        ],
+        [
+          'seekforward',
+          (details) => {
+            const offset = details?.seekOffset ?? 10;
+            const dur = durationRef.current || 0;
+            const pos = dur > 0 ? Math.min(dur, currentTimeRef.current + offset) : currentTimeRef.current + offset;
+            seekToRef.current(pos);
+          }
+        ],
+        [
+          'seekto',
+          (details) => {
+            if (typeof details?.seekTime === 'number' && Number.isFinite(details.seekTime)) {
+              seekToRef.current(details.seekTime, Boolean(details.fastSeek));
+            }
+          }
+        ],
+        ['stop', () => stopRef.current()]
+      ];
+
+      actionMap.forEach(([action, handler]) => {
+        try {
+          navigator.mediaSession.setActionHandler(action, handler);
+        } catch (err) {
+          console.warn(`[Moodsonix] MediaSession action "${action}" not supported:`, err);
+        }
+      });
+    }
 
     return () => {
-      if (!('mediaSession' in navigator)) return;
-      actionMap.forEach(([action]) => {
-        try {
-          navigator.mediaSession.setActionHandler(action, null);
-        } catch {}
-      });
+      setNativeActionHandler('play', null);
+      setNativeActionHandler('pause', null);
+      setNativeActionHandler('previoustrack', null);
+      setNativeActionHandler('nexttrack', null);
+      setNativeActionHandler('seekto', null);
+      setNativeActionHandler('stop', null);
+
+      if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+        const webActions: MediaSessionAction[] = [
+          'play',
+          'pause',
+          'previoustrack',
+          'nexttrack',
+          'seekbackward',
+          'seekforward',
+          'seekto',
+          'stop'
+        ];
+        webActions.forEach((action) => {
+          try {
+            navigator.mediaSession.setActionHandler(action, null);
+          } catch {}
+        });
+      }
     };
   }, []);
 
   // 2. Set navigator.mediaSession.metadata on every track change (96, 128, 192, 256, and 512 sizes)
   useEffect(() => {
-    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
-
     if (currentSong) {
       const rawThumb = currentSong.thumbnail || '/pwa-512x512.png';
       const resolvedThumb = resolveArtworkUrl(rawThumb);
@@ -1065,38 +1106,49 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         type: mimeType
       }));
 
-      try {
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: currentSong.title || 'Unknown Title',
-          artist: currentSong.artist || 'Unknown Artist',
-          album: currentSong.album || 'Moodsonix',
-          artwork
-        });
-      } catch (err) {
-        console.warn('[Moodsonix] MediaSession metadata error:', err);
+      if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: currentSong.title || 'Unknown Title',
+            artist: currentSong.artist || 'Unknown Artist',
+            album: currentSong.album || 'Moodsonix',
+            artwork
+          });
+        } catch (err) {
+          console.warn('[Moodsonix] MediaSession metadata error:', err);
+        }
       }
+
+      setNativeMetadata({
+        title: currentSong.title || 'Unknown Title',
+        artist: currentSong.artist || 'Unknown Artist',
+        album: currentSong.album || 'Moodsonix',
+        artwork
+      });
 
       syncPositionState(0, currentSong.duration || durationRef.current, playbackRateRef.current);
     } else {
-      try {
-        navigator.mediaSession.metadata = null;
-      } catch {}
+      if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.metadata = null;
+        } catch {}
+      }
+      setNativeMetadata({});
     }
   }, [currentSong, syncPositionState]);
 
   // 3. Keep navigator.mediaSession.playbackState ("playing" or "paused") synced with real player state
   useEffect(() => {
-    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const targetState: 'playing' | 'paused' | 'none' =
+      !currentSong || isSessionStopped ? 'none' : playbackState === 'playing' ? 'playing' : 'paused';
 
-    try {
-      if (!currentSong || isSessionStopped) {
-        navigator.mediaSession.playbackState = 'none';
-      } else if (playbackState === 'playing') {
-        navigator.mediaSession.playbackState = 'playing';
-      } else {
-        navigator.mediaSession.playbackState = 'paused';
-      }
-    } catch {}
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.playbackState = targetState;
+      } catch {}
+    }
+
+    setNativePlaybackState(targetState);
 
     syncPositionState();
   }, [playbackState, currentSong, isSessionStopped, syncPositionState]);
