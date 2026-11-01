@@ -1,0 +1,8 @@
+{
+  "name": "Moodsonix",
+  "description": "AI-Powered YouTube Music Player PWA with mood-based music discovery, synchronized LRCLIB lyrics, ambient sound mixer, Pomodoro focus timer, and custom themes.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
