@@ -23,6 +23,59 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     
+    <!-- Suppress Vite HMR WebSocket connection in iframe sandbox where HMR is disabled -->
+    <script>
+      (function() {
+        var OriginalWebSocket = window.WebSocket;
+        if (OriginalWebSocket) {
+          window.WebSocket = function(url, protocols) {
+            var isViteHmr = (Array.isArray(protocols) ? protocols.indexOf('vite-hmr') !== -1 : protocols === 'vite-hmr') ||
+                            (typeof url === 'string' && (url.indexOf('vite-hmr') !== -1 || url.indexOf('token=') !== -1));
+            if (isViteHmr) {
+              var target = new EventTarget();
+              this.readyState = 0;
+              this.url = url;
+              this.protocol = 'vite-hmr';
+              this.addEventListener = target.addEventListener.bind(target);
+              this.removeEventListener = target.removeEventListener.bind(target);
+              this.dispatchEvent = target.dispatchEvent.bind(target);
+              this.send = function() {};
+              this.close = function() {
+                this.readyState = 3;
+                this.dispatchEvent(new Event('close'));
+              };
+              var self = this;
+              setTimeout(function() {
+                self.readyState = 1;
+                self.dispatchEvent(new Event('open'));
+              }, 10);
+              return;
+            }
+            return new OriginalWebSocket(url, protocols);
+          };
+          window.WebSocket.prototype = OriginalWebSocket.prototype;
+          window.WebSocket.CONNECTING = 0;
+          window.WebSocket.OPEN = 1;
+          window.WebSocket.CLOSING = 2;
+          window.WebSocket.CLOSED = 3;
+        }
+
+        window.addEventListener('unhandledrejection', function(event) {
+          if (event && event.reason && String(event.reason).indexOf('WebSocket closed without opened') !== -1) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          if (event && event.message && String(event.message).indexOf('WebSocket closed without opened') !== -1) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
+
     <!-- YouTube IFrame API -->
     <script src="https://www.youtube.com/iframe_api"></script>
   </head>
