@@ -1,5 +1,6 @@
 import { Song, LyricsData } from '../types/music';
 import { parseLRC } from './musicApi';
+import { API_BASE } from '../lib/apiBase';
 
 const SOURCE_TIMEOUT_MS = 5000;
 
@@ -202,7 +203,7 @@ async function tryNeteaseLyrics(
     });
 
     const data = await safeFetchJson<NeteaseProxyResponse>(
-      `/api/lyrics-netease?${params.toString()}`,
+      `${API_BASE}/api/lyrics-netease?${params.toString()}`,
       attemptTimeout,
       signal
     );

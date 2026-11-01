@@ -24,6 +24,7 @@ import { AccountPage } from '../../pages/AccountPage';
 
 import { Sliders, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { API_BASE } from '../../lib/apiBase';
 
 export const AppShell: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<string>('home');
@@ -90,7 +91,7 @@ export const AppShell: React.FC = () => {
 
     cueSong(fallbackSong);
 
-    fetch(`/api/song/${encodeURIComponent(sharedId)}`)
+    fetch(`${API_BASE}/api/song/${encodeURIComponent(sharedId)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((songData) => {
         if (songData && songData.id) {

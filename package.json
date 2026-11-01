@@ -7,9 +7,12 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "start": "node server.ts",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "cap:sync": "npm run build && npx cap sync android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
     "@google/genai": "latest",
     "clsx": "^2.1.1",
     "express": "^4.21.2",
@@ -20,6 +23,7 @@
     "youtubei.js": "^12.2.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@tailwindcss/vite": "^4.0.7",
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.4",

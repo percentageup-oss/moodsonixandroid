@@ -1,5 +1,6 @@
 import { Song, LyricsData, LyricLine, PlaylistInfo } from '../types/music';
 import { fetchLyricsFallbacks } from './lyricsFallbacks';
+import { API_BASE } from '../lib/apiBase';
 
 interface LyricsCacheEntry {
   data: LyricsData;
@@ -244,12 +245,12 @@ export async function searchMusic(
 
   // 1. Try local server API route first
   try {
-    let endpoint = `/api/search?q=${encodeURIComponent(trimmed)}`;
+    let endpoint = `${API_BASE}/api/search?q=${encodeURIComponent(trimmed)}`;
     let body: string | undefined = undefined;
     let method = 'GET';
 
     if (isMood) {
-      endpoint = '/api/mood-search';
+      endpoint = `${API_BASE}/api/mood-search`;
       method = 'POST';
       body = JSON.stringify({ mood: trimmed });
     }
@@ -341,7 +342,7 @@ export async function fetchLyrics(
       duration: (song.duration || 0).toString()
     });
 
-    const res = await fetch(`/api/lyrics?${params.toString()}`, { signal });
+    const res = await fetch(`${API_BASE}/api/lyrics?${params.toString()}`, { signal });
     const { data, isJson } = await safeJsonResponse<LyricsData>(res);
     if (res.ok && isJson && data && !data.notFound) {
       lyricsCache.set(cacheKey, { data, expiresAt: Date.now() + LYRICS_CACHE_TTL_MS });
@@ -439,7 +440,7 @@ export async function fetchPlaylist(
 
   // 1. Try local server API
   try {
-    const res = await fetch(`/api/playlist?url=${encodeURIComponent(trimmed)}`, { signal });
+    const res = await fetch(`${API_BASE}/api/playlist?url=${encodeURIComponent(trimmed)}`, { signal });
     const { data, isJson } = await safeJsonResponse<PlaylistInfo>(res);
     if (res.ok && isJson && data && Array.isArray(data.tracks) && data.tracks.length > 0) {
       return data;
